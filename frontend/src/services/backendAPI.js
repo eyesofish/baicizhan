@@ -42,6 +42,11 @@ const clearTokens = () => {
   localStorage.removeItem(REFRESH_TOKEN_KEY)
 }
 
+export const isRequestCanceled = (error) =>
+  axios.isCancel(error) ||
+  error?.code === 'ERR_CANCELED' ||
+  error?.name === 'CanceledError'
+
 const optionalText = (value) => {
   const text = typeof value === 'string' ? value.trim() : ''
   return text === '' ? undefined : text
@@ -140,7 +145,7 @@ const getOrCreateDevAccount = () => {
   return { email, password, displayName }
 }
 
-export const ensureBackendSession = async () => {
+export const ensureBackendSession = async (signal) => {
   if (accessToken) {
     return
   }
@@ -151,7 +156,7 @@ export const ensureBackendSession = async () => {
       email: account.email,
       password: account.password,
       displayName: account.displayName
-    })
+    }, { signal })
     setTokens(unwrap(registerResp))
     return
   } catch (error) {
@@ -166,28 +171,28 @@ export const ensureBackendSession = async () => {
   const loginResp = await refreshClient.post('/v1/auth/login', {
     email: account.email,
     password: account.password
-  })
+  }, { signal })
   setTokens(unwrap(loginResp))
 }
 
-const getMyLists = async () => {
-  await ensureBackendSession()
-  const response = await client.get('/v1/lists')
+const getMyLists = async (signal) => {
+  await ensureBackendSession(signal)
+  const response = await client.get('/v1/lists', { signal })
   return unwrap(response) || []
 }
 
-const createJournalList = async () => {
+const createJournalList = async (signal) => {
   const response = await client.post('/v1/lists', {
     name: 'My Journal',
     sourceLanguage: 'en',
     targetLanguage: 'zh-Hans',
     isPublic: false
-  })
+  }, { signal })
   return unwrap(response)
 }
 
-export const ensureJournalList = async () => {
-  const lists = await getMyLists()
+export const ensureJournalList = async (signal) => {
+  const lists = await getMyLists(signal)
   const preferredId = Number(localStorage.getItem(JOURNAL_LIST_ID_KEY))
   if (preferredId && lists.some((list) => list.id === preferredId)) {
     return preferredId
@@ -197,7 +202,7 @@ export const ensureJournalList = async () => {
   if (lists.length > 0) {
     targetId = lists[0].id
   } else {
-    const created = await createJournalList()
+    const created = await createJournalList(signal)
     targetId = created.id
   }
 
@@ -241,9 +246,9 @@ const buildItemPayload = (wordData) => {
   }
 }
 
-export const loadJournalWords = async () => {
-  const listId = await ensureJournalList()
-  const response = await client.get(`/v1/lists/${listId}/items`)
+export const loadJournalWords = async (signal) => {
+  const listId = await ensureJournalList(signal)
+  const response = await client.get(`/v1/lists/${listId}/items`, { signal })
   const items = unwrap(response) || []
   return {
     listId,
@@ -273,15 +278,18 @@ export const deleteJournalWord = async (itemId, listId) => {
   return loadJournalWords()
 }
 
-export const getReviewCards = async (limit = 20) => {
-  await ensureBackendSession()
-  const response = await client.get('/v1/review/next', { params: { limit } })
+export const getReviewCards = async (limit = 20, signal) => {
+  await ensureBackendSession(signal)
+  const response = await client.get('/v1/review/next', {
+    params: { limit },
+    signal
+  })
   return unwrap(response) || []
 }
 
-export const getTermDetail = async (termId) => {
-  await ensureBackendSession()
-  const response = await client.get(`/v1/terms/${termId}`)
+export const getTermDetail = async (termId, signal) => {
+  await ensureBackendSession(signal)
+  const response = await client.get(`/v1/terms/${termId}`, { signal })
   return unwrap(response)
 }
 
@@ -296,7 +304,7 @@ const mapReviewWord = (card, detail) => {
   return {
     id: card.termId,
     termId: card.termId,
-    word: card.text,
+    word: card.text || '',
     pronunciation: detail?.ipa || '',
     partOfSpeech: selectedSense?.partOfSpeech || '',
     definition: selectedSense?.definition || '',
@@ -314,34 +322,54 @@ const mapReviewWord = (card, detail) => {
   }
 }
 
-export const getReviewWordPool = async (limit = 20) => {
-  const cards = await getReviewCards(limit)
+export const getReviewWordPool = async (limit = 20, signal) => {
+  const cards = await getReviewCards(limit, signal)
   if (cards.length === 0) {
     return []
   }
 
-  const details = await Promise.all(
-    cards.map(async (card) => {
-      try {
-        return await getTermDetail(card.termId)
-      } catch {
-        return null
-      }
-    })
+  const detailResults = await Promise.allSettled(
+    cards.map((card) => getTermDetail(card.termId, signal))
   )
+  const detailsByTermId = {}
+  detailResults.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      detailsByTermId[cards[index].termId] = result.value
+    }
+  })
 
-  return cards.map((card, index) => mapReviewWord(card, details[index]))
+  const canceledDetailRequest = detailResults.find(
+    (result) =>
+      result.status === 'rejected' && isRequestCanceled(result.reason)
+  )
+  if (canceledDetailRequest) {
+    throw canceledDetailRequest.reason
+  }
+
+  return cards.map((card) => mapReviewWord(card, detailsByTermId[card.termId]))
 }
 
-export const submitReviewResult = async (termId, rating, elapsedMs) => {
-  await ensureBackendSession()
+export const submitReviewResult = async (
+  termId,
+  rating,
+  elapsedMs,
+  signal
+) => {
+  await ensureBackendSession(signal)
   const response = await client.post(`/v1/review/${termId}/result`, {
     rating,
     elapsedMs
-  })
+  }, { signal })
   return unwrap(response)
 }
 
 export const getApiErrorMessage = (error, fallback = 'Request failed') => {
   return error?.response?.data?.message || error?.message || fallback
 }
+
+export const normalizeApiError = (error, fallback = 'Request failed') => ({
+  status: error?.response?.status || 0,
+  code: error?.response?.data?.code || error?.code || 'UNKNOWN',
+  message: getApiErrorMessage(error, fallback),
+  traceId: error?.response?.data?.traceId || ''
+})

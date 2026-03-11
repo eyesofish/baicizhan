@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSelector, useDispatch } from 'react-redux'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { GrPrevious, GrNext } from 'react-icons/gr'
 import {
   setShowNotFinished as setFlashcardsShowNotFinished,
@@ -14,6 +14,7 @@ const Card = () => {
   const idx = Number(index)
   const { mode, wordArray } = useSelector((state) => state.flashcards)
   const [face, setFace] = useState('front')
+  const startedAtRef = useRef(Date.now())
   const dispatch = useDispatch()
 
   useEffect(() => {
@@ -21,6 +22,10 @@ const Card = () => {
       navigate('../..')
     }
   }, [idx, wordArray, navigate])
+
+  useEffect(() => {
+    startedAtRef.current = Date.now()
+  }, [idx])
 
   const wordData = wordArray[idx]
 
@@ -119,9 +124,11 @@ const Card = () => {
       const newScore = familiarityButtons.find(
         (familiarity) => familiarity.name === e.target.name
       ).score
+      const elapsedMs = Math.max(0, Date.now() - startedAtRef.current)
       const updatedWordData = {
         ...wordData,
-        pointsEarned: newScore
+        pointsEarned: newScore,
+        elapsedMs
       }
       dispatch(
         setFlashcardsWordArrayByIndex({ index: idx, word: updatedWordData })

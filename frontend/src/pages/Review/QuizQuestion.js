@@ -2,7 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useSelector, useDispatch } from 'react-redux'
 import MCQuestion from '../../components/Features/Review/MCQuestion'
 import { setWordArrayById as setQuizWordArrayById, setShowNotFinished as setQuizShowNotFinished } from '../../reducers/quizReducer'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import Button from '../../components/Common/Button'
 import BlanksQuestion from '../../components/Features/Review/BlanksQuestion'
 import { checkBlanksCorrect, hasBlank } from '../../utils/reviewHelper'
@@ -17,6 +17,7 @@ const QuizQuestion = () => {
   const [checked, setChecked] = useState(false)
   const [correctWrongMessage, setCorrectWrongMessage] = useState(null)
   const [showCorrectSpelling, setShowCorrectSpelling] = useState(false)
+  const startedAtRef = useRef(Date.now())
 
   const { questionArray, wordArray } = useSelector((state) => state.quiz)
   const questionData = questionArray[index]
@@ -44,6 +45,10 @@ const QuizQuestion = () => {
   }, [questionData, questionType, navigate])
 
   useEffect(() => {
+    startedAtRef.current = Date.now()
+  }, [index, questionData?.id])
+
+  useEffect(() => {
     if (checked) {
       if (
         (questionType === 'mc' && chosen === questionData.correctAnswer) ||
@@ -59,6 +64,7 @@ const QuizQuestion = () => {
 
   const handleCheckClick = () => {
     const wordData = wordArray.find((word) => word.id === questionData.id)
+    const elapsedMs = Math.max(0, Date.now() - startedAtRef.current)
     // console.log('wordData before update', wordArray)
     if (questionType === 'mc') {
       if (!chosen) {
@@ -68,7 +74,8 @@ const QuizQuestion = () => {
         const newPointsEarned = chosen === questionData.correctAnswer ? 1 : -1
         const updatedWordData = {
           ...wordData,
-          pointsEarned: wordData.pointsEarned + newPointsEarned
+          pointsEarned: wordData.pointsEarned + newPointsEarned,
+          elapsedMs: Number(wordData.elapsedMs || 0) + elapsedMs
         }
         console.log('correct? ', chosen === questionData.correctAnswer)
         console.log(
@@ -94,7 +101,8 @@ const QuizQuestion = () => {
       setShowCorrectSpelling(true)
       const updatedWordData = {
         ...wordData,
-        pointsEarned: wordData.pointsEarned + newPointsEarned
+        pointsEarned: wordData.pointsEarned + newPointsEarned,
+        elapsedMs: Number(wordData.elapsedMs || 0) + elapsedMs
       }
       console.log(
         'pointsEarned',

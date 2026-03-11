@@ -1,0 +1,6 @@
+{
+  "modelType": "xgboost-lite-linear",
+  "featureNames": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10"],
+  "weights": [1.8, 0.6, 0.2, 1.5, -0.4, -0.3, -0.4, -0.0006, 0.2, 0.05],
+  "bias": 0.0
+}

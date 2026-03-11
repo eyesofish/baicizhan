@@ -23,15 +23,18 @@ const unwrap = (response) => {
   return response.data.data
 }
 
-const getWordData = async (word) => {
+const getWordData = async (word, signal) => {
   try {
     const response = await client.get('/v1/dictionary/lookup', {
-      params: { word }
+      params: { word },
+      signal
     })
     return unwrap(response)
   } catch (error) {
+    if (error?.code === 'ERR_CANCELED') {
+      throw error
+    }
     if (error.response && error.response.status === 404) {
-      console.error('word not found')
       return {
         word,
         results: []
@@ -43,18 +46,21 @@ const getWordData = async (word) => {
   }
 }
 
-const getMatchedWords = async (word) => {
+const getMatchedWords = async (word, signal) => {
   try {
     const response = await client.get('/v1/dictionary/match', {
       params: {
         prefix: word,
         limit: 10
-      }
+      },
+      signal
     })
     return unwrap(response)
   } catch (error) {
+    if (error?.code === 'ERR_CANCELED') {
+      throw error
+    }
     if (error.response && error.response.status === 404) {
-      console.error('word not found')
       return { results: { data: [] } }
     } else {
       console.error(error)

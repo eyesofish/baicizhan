@@ -47,6 +47,14 @@ const WordHeader = ({ wordData, page, speak, currentShowDetails }) => {
       )
       dispatch(setJournalListId(listId))
       dispatch(setJournalWords(words))
+      window.dispatchEvent(
+        new CustomEvent('journal:changed', {
+          detail: {
+            type: 'deleted',
+            word: wordData.word || ''
+          }
+        })
+      )
     } catch (error) {
       window.alert(getApiErrorMessage(error, 'Failed to delete this word.'))
     }

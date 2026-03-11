@@ -174,6 +174,15 @@ const WordForm = ({ page }) => {
         dispatch(setJournalSortValue('updated'))
       }
 
+      window.dispatchEvent(
+        new CustomEvent('journal:changed', {
+          detail: {
+            type: page === 'search' ? 'added' : 'updated',
+            word: filteredFormData.word || ''
+          }
+        })
+      )
+
       toggleShowForm(false)
     } catch (error) {
       window.alert(

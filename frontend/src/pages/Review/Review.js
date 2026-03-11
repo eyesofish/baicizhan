@@ -1,57 +1,96 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
+import { useDispatch } from 'react-redux'
 import {
   setSearchValue as setSearchSearchValue,
   setCurrentPage as setSearchCurrentPage
 } from '../../reducers/searchReducer'
-import { setListId as setJournalListId, setWords as setJournalWords } from '../../reducers/journalReducer'
-import React, { useEffect, useState } from 'react'
-import { getApiErrorMessage, loadJournalWords } from '../../services/backendAPI'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  getApiErrorMessage,
+  getReviewCards,
+  isRequestCanceled
+} from '../../services/backendAPI'
 
 const Review = () => {
   const location = useLocation()
   const dispatch = useDispatch()
-  const { words } = useSelector((state) => state.journal)
+  const requestControllerRef = useRef(null)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
+  const [dueCount, setDueCount] = useState(0)
   const isReviewPage = location.pathname === '/review'
   const divStyleClassName =
     'w-full font-semibold hover:bg-indigo-100 hover:text-indigo-800 text-lg border-2 rounded-xl border-indigo-100 flex items-center justify-center p-6'
 
-  useEffect(() => {
-    const fetchJournal = async () => {
-      setIsLoading(true)
-      try {
-        const { listId, words } = await loadJournalWords()
-        dispatch(setJournalListId(listId))
-        dispatch(setJournalWords(words))
-        setLoadError('')
-      } catch (error) {
-        setLoadError(
-          getApiErrorMessage(
-            error,
-            'Failed to load journal from backend before review.'
-          )
-        )
-      } finally {
+  const fetchDueCards = useCallback(async () => {
+    requestControllerRef.current?.abort()
+    const controller = new AbortController()
+    requestControllerRef.current = controller
+
+    setLoadError('')
+    setIsLoading(true)
+
+    try {
+      const cards = await getReviewCards(20, controller.signal)
+      if (requestControllerRef.current !== controller) {
+        return
+      }
+      setDueCount(cards.length)
+    } catch (error) {
+      if (isRequestCanceled(error)) {
+        return
+      }
+      if (requestControllerRef.current !== controller) {
+        return
+      }
+      setDueCount(0)
+      setLoadError(
+        getApiErrorMessage(error, 'Failed to load due review cards from backend.')
+      )
+    } finally {
+      if (requestControllerRef.current === controller) {
         setIsLoading(false)
       }
     }
-    fetchJournal().catch((error) => {
-      console.error('load review journal failed', error)
-    })
-  }, [dispatch])
+  }, [])
 
-  const isJournalEmpty = !Array.isArray(words) || words.length === 0
+  useEffect(() => {
+    fetchDueCards().catch((error) => {
+      if (!isRequestCanceled(error)) {
+        console.error('load review due cards failed', error)
+      }
+    })
+
+    return () => {
+      requestControllerRef.current?.abort()
+    }
+  }, [fetchDueCards])
+
   let reviewContent
   if (loadError) {
-    reviewContent = <div className='text-rose-600 text-center'>{loadError}</div>
+    reviewContent = (
+      <div className='flex flex-col items-center gap-3'>
+        <div className='text-rose-600 text-center'>{loadError}</div>
+        <button
+          type='button'
+          className='border-2 border-indigo-100 rounded-lg px-4 py-2 font-semibold hover:bg-indigo-100 hover:text-indigo-800'
+          onClick={() => {
+            fetchDueCards().catch((error) => {
+              if (!isRequestCanceled(error)) {
+                console.error('retry review due cards failed', error)
+              }
+            })
+          }}>
+          Retry
+        </button>
+      </div>
+    )
   } else if (isLoading) {
-    reviewContent = <div className='text-center'>Loading review data...</div>
-  } else if (isJournalEmpty) {
+    reviewContent = <div className='text-center'>Loading due review cards...</div>
+  } else if (dueCount === 0) {
     reviewContent = (
       <div className='text-center w-full'>
-        There is no word in your journal to review.{' '}
+        No review words are due right now.{' '}
         <Link
           className='text-indigo-800 hover:underline'
           to='../search'
@@ -66,6 +105,7 @@ const Review = () => {
   } else {
     reviewContent = (
       <>
+        <div className='text-center text-sm text-gray-600'>Due now: {dueCount}</div>
         <Link to='flashcards'>
           <div className={divStyleClassName}>Flashcards</div>
         </Link>

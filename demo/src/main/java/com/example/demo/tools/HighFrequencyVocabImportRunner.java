@@ -4,13 +4,17 @@ import com.example.demo.config.ImportProperties;
 import com.example.demo.domain.entity.Language;
 import com.example.demo.domain.entity.Sense;
 import com.example.demo.domain.entity.Term;
+import com.example.demo.domain.entity.TermStat;
 import com.example.demo.domain.entity.Translation;
 import com.example.demo.domain.repository.LanguageRepository;
 import com.example.demo.domain.repository.SenseRepository;
 import com.example.demo.domain.repository.TermRepository;
+import com.example.demo.domain.repository.TermStatRepository;
 import com.example.demo.domain.repository.TranslationRepository;
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,6 +46,7 @@ public class HighFrequencyVocabImportRunner implements ApplicationRunner {
     private final ImportProperties properties;
     private final LanguageRepository languageRepository;
     private final TermRepository termRepository;
+    private final TermStatRepository termStatRepository;
     private final SenseRepository senseRepository;
     private final TranslationRepository translationRepository;
     private final ConfigurableApplicationContext applicationContext;
@@ -50,6 +55,7 @@ public class HighFrequencyVocabImportRunner implements ApplicationRunner {
         ImportProperties properties,
         LanguageRepository languageRepository,
         TermRepository termRepository,
+        TermStatRepository termStatRepository,
         SenseRepository senseRepository,
         TranslationRepository translationRepository,
         ConfigurableApplicationContext applicationContext
@@ -57,6 +63,7 @@ public class HighFrequencyVocabImportRunner implements ApplicationRunner {
         this.properties = properties;
         this.languageRepository = languageRepository;
         this.termRepository = termRepository;
+        this.termStatRepository = termStatRepository;
         this.senseRepository = senseRepository;
         this.translationRepository = translationRepository;
         this.applicationContext = applicationContext;
@@ -195,6 +202,7 @@ public class HighFrequencyVocabImportRunner implements ApplicationRunner {
             term = termRepository.save(term);
             stats.insertedTerms.incrementAndGet();
         }
+        upsertTermStat(term, stats.processed.get(), word);
 
         Sense sense = ensureSense(term, parsedMeaning, stats);
         if (!parsedMeaning.translation().isBlank()) {
@@ -225,6 +233,25 @@ public class HighFrequencyVocabImportRunner implements ApplicationRunner {
             );
         }
         return false;
+    }
+
+    private void upsertTermStat(Term term, int rank, String word) {
+        if (term == null || term.getId() == null || rank <= 0) {
+            return;
+        }
+        TermStat termStat = termStatRepository.findById(term.getId()).orElseGet(TermStat::new);
+        termStat.setTerm(term);
+        termStat.setTermId(term.getId());
+        termStat.setFrequencyRank(rank);
+        termStat.setDifficultyScore(computeDifficultyScore(word));
+        termStat.setSourceType("import");
+        termStatRepository.save(termStat);
+    }
+
+    private BigDecimal computeDifficultyScore(String word) {
+        int length = word == null ? 0 : word.length();
+        double raw = 20.0D + Math.min(12, Math.max(1, length)) * 5.0D;
+        return BigDecimal.valueOf(Math.min(95.0D, raw)).setScale(2, RoundingMode.HALF_UP);
     }
 
     private Sense ensureSense(Term term, ParsedMeaning parsedMeaning, ImportStats stats) {

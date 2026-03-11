@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate, Outlet } from 'react-router-dom'
 import { getMatchedWords } from '../../services/wordAPI'
 import { useSelector, useDispatch } from 'react-redux'
@@ -7,6 +7,7 @@ import {
   setIsLoading as setPossibleWordsIsLoading,
   setError as setPossibleWordsError
 } from '../../reducers/possibleWordsReducer'
+import { normalizeApiError } from '../../services/backendAPI'
 
 const CACHE_EXPIRATION_MS = 5 * 60 * 1000 // 5 min
 
@@ -17,16 +18,27 @@ const PossibleWords = () => {
   const { matchedWords, isLoading, error } = useSelector(
     (state) => state.possibleWords
   )
-  const isFirstRender = useRef(true)
 
+  const [isNotFound, setIsNotFound] = useState(false)
+  const [retryToken, setRetryToken] = useState(0)
   const cache = useMemo(() => ({}), [])
 
   const wordStyleClassName =
     'cursor-pointer border-2 border-gray-100 p-3 rounded-xl text-lg font-medium text-indigo-900 hover:border-indigo-100 hover:bg-indigo-100 hover:text-indigo-900 select-none'
 
-  console.log('searchValue in possibleWords', searchValue)
-
   useEffect(() => {
+    const query = searchValue.trim().toLowerCase()
+
+    if (query === '') {
+      dispatch(setPossibleWordsMatchedWords([]))
+      dispatch(setPossibleWordsError(null))
+      dispatch(setPossibleWordsIsLoading(false))
+      setIsNotFound(false)
+      return
+    }
+
+    const controller = new AbortController()
+
     const isCacheExpired = (cacheItem) =>
       cacheItem && Date.now() - cacheItem.timestamp > CACHE_EXPIRATION_MS
 
@@ -37,40 +49,56 @@ const PossibleWords = () => {
         }
       })
     }
-    async function fetchData () {
-      if (searchValue === '' || error) {
-        return
-      }
+
+    const timeoutId = setTimeout(async () => {
       try {
         cleanupExpiredCache()
-        if (cache[searchValue] && !isCacheExpired(cache[searchValue])) {
-          dispatch(setPossibleWordsMatchedWords(cache[searchValue]))
-        } else {
-          dispatch(setPossibleWordsIsLoading(true))
-          const returnedWords = await getMatchedWords(searchValue.toLowerCase())
-          cache[searchValue.toLowerCase()] = returnedWords.results.data
-          dispatch(setPossibleWordsMatchedWords(returnedWords.results.data))
-        }
+
+        dispatch(setPossibleWordsIsLoading(true))
         dispatch(setPossibleWordsError(null))
+
+        if (cache[query] && !isCacheExpired(cache[query])) {
+          const cachedWords = cache[query].data
+          dispatch(setPossibleWordsMatchedWords(cachedWords))
+          setIsNotFound(cachedWords.length === 0)
+          return
+        }
+
+        const returnedWords = await getMatchedWords(query, controller.signal)
+        const nextMatchedWords = returnedWords?.results?.data || []
+        cache[query] = {
+          timestamp: Date.now(),
+          data: nextMatchedWords
+        }
+
+        dispatch(setPossibleWordsMatchedWords(nextMatchedWords))
+        setIsNotFound(nextMatchedWords.length === 0)
       } catch (error) {
+        if (error?.code === 'ERR_CANCELED') {
+          return
+        }
+
+        setIsNotFound(false)
         dispatch(
-          setPossibleWordsError({
-            ...error,
-            message:
+          setPossibleWordsError(
+            normalizeApiError(
+              error,
               'Sorry, we could not fetch possible words. Please try again later.'
-          })
+            )
+          )
         )
       } finally {
-        dispatch(setPossibleWordsIsLoading(false))
+        if (!controller.signal.aborted) {
+          dispatch(setPossibleWordsIsLoading(false))
+        }
       }
-    }
-    const newTimeoutId = setTimeout(() => {
-      fetchData()
     }, 200)
+
     return () => {
-      clearTimeout(newTimeoutId)
+      clearTimeout(timeoutId)
+      controller.abort()
     }
-  }, [searchValue, dispatch, error, cache])
+  }, [searchValue, dispatch, cache, retryToken])
 
   const matchedWordsElement = (() => {
     if (isLoading && searchValue !== '') {
@@ -81,10 +109,24 @@ const PossibleWords = () => {
       return null
     }
 
+    if (error) {
+      return (
+        <div className='flex flex-col items-start gap-2'>
+          <div>Error: {error.message}</div>
+          <button
+            type='button'
+            className='border-2 border-indigo-100 rounded-lg px-3 py-1 text-sm font-semibold hover:bg-indigo-100 hover:text-indigo-800'
+            onClick={() => setRetryToken((value) => value + 1)}>
+            Retry
+          </button>
+        </div>
+      )
+    }
+
     if (matchedWords.length > 0) {
-      return matchedWords.map((word, i) => (
+      return matchedWords.map((word, index) => (
         <div
-          key={word + i}
+          key={word + index}
           className={wordStyleClassName}
           onClick={() => navigate(`${word}`)}>
           {word}
@@ -92,21 +134,17 @@ const PossibleWords = () => {
       ))
     }
 
-    if (!isFirstRender.current) {
+    if (isNotFound) {
       return <div>Word not found</div>
     }
 
     return null
   })()
 
-  useEffect(() => {
-    isFirstRender.current = false
-  }, [])
-
   return (
     <div>
       <div className='search--matched-words flex flex-col gap-4'>
-        {error ? <div>Error: {error.message}</div> : matchedWordsElement}
+        {matchedWordsElement}
       </div>
       <Outlet />
     </div>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Word from '../components/Features/Word/Word'
 import SearchField from '../components/Common/SearchField'
@@ -22,13 +22,16 @@ import { IoIosArrowUp } from 'react-icons/io'
 import useIsMobile from '../hooks/useIsMobile'
 import {
   getApiErrorMessage,
+  isRequestCanceled,
   loadJournalWords
 } from '../services/backendAPI'
 
 const Journal = () => {
   const dispatch = useDispatch()
+  const requestControllerRef = useRef(null)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
+  const [statusMessage, setStatusMessage] = useState({ text: '', type: '' })
   const {
     words,
     searchValue,
@@ -40,25 +43,44 @@ const Journal = () => {
     filterOpen
   } = useSelector((state) => state.journal)
 
-  // console.log('showAllDetails', showAllDetails)
-  // console.log('sortValue', sortValue)
   const { isMobile } = useIsMobile(1070)
 
-  const fetchJournalWords = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      const { listId, words } = await loadJournalWords()
-      dispatch(setJournalListId(listId))
-      dispatch(setJournalWords(words))
+  const fetchJournalWords = useCallback(
+    async () => {
+      requestControllerRef.current?.abort()
+      const controller = new AbortController()
+      requestControllerRef.current = controller
       setLoadError('')
-    } catch (error) {
-      setLoadError(
-        getApiErrorMessage(error, 'Failed to load journal words from backend.')
-      )
-    } finally {
-      setIsLoading(false)
-    }
-  }, [dispatch])
+      setIsLoading(true)
+
+      try {
+        const { listId, words } = await loadJournalWords(controller.signal)
+        if (requestControllerRef.current !== controller) {
+          return
+        }
+        dispatch(setJournalListId(listId))
+        dispatch(setJournalWords(words))
+        setLoadError('')
+      } catch (error) {
+        if (isRequestCanceled(error)) {
+          return
+        }
+
+        if (requestControllerRef.current !== controller) {
+          return
+        }
+
+        setLoadError(
+          getApiErrorMessage(error, 'Failed to load journal words from backend.')
+        )
+      } finally {
+        if (requestControllerRef.current === controller) {
+          setIsLoading(false)
+        }
+      }
+    },
+    [dispatch]
+  )
 
   const sortOptions = {
     updated: (a, b) => b.lastUpdated.localeCompare(a.lastUpdated),
@@ -74,14 +96,12 @@ const Journal = () => {
     fetchJournalWords().catch((error) => {
       console.error('load journal failed', error)
     })
+    return () => {
+      requestControllerRef.current?.abort()
+    }
   }, [fetchJournalWords])
 
   useEffect(() => {
-    if (window.scrollY > 100) {
-      dispatch(toggleJournalShowGoToTopButton(true))
-    } else {
-      dispatch(toggleJournalShowGoToTopButton(false))
-    }
     const handleScroll = () => {
       if (window.scrollY > 100) {
         dispatch(toggleJournalShowGoToTopButton(true))
@@ -89,17 +109,54 @@ const Journal = () => {
         dispatch(toggleJournalShowGoToTopButton(false))
       }
     }
+
+    handleScroll()
     window.addEventListener('scroll', handleScroll)
+
     return () => {
       window.removeEventListener('scroll', handleScroll)
     }
   }, [dispatch])
 
+  useEffect(() => {
+    const handleJournalChanged = (event) => {
+      const actionType = event?.detail?.type
+      if (actionType === 'deleted') {
+        setStatusMessage({ text: 'Word deleted.', type: 'success' })
+      } else if (actionType === 'updated') {
+        setStatusMessage({ text: 'Word updated.', type: 'success' })
+      } else if (actionType === 'added') {
+        setStatusMessage({ text: 'Word added.', type: 'success' })
+      }
+    }
+
+    window.addEventListener('journal:changed', handleJournalChanged)
+    return () => {
+      window.removeEventListener('journal:changed', handleJournalChanged)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!statusMessage.text) {
+      return undefined
+    }
+
+    const timer = window.setTimeout(() => {
+      setStatusMessage({ text: '', type: '' })
+    }, 2500)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [statusMessage])
+
   const getFilteredAndSortedWords = () => {
     if (!words) {
       return []
     }
+
     let filteredAndSortedWords = [...words]
+
     if (searchValue !== '') {
       filteredAndSortedWords = filteredAndSortedWords
         .filter((word) =>
@@ -142,6 +199,7 @@ const Journal = () => {
   }
 
   const displayedWords = getFilteredAndSortedWords()
+
   const NoWordsFoundMessage = () => (
     <div className='flex flex-col pt-5 items-center justify-center'>
       <h3 className='font-bold text-lg mb-2'>No words found</h3>
@@ -161,12 +219,39 @@ const Journal = () => {
     </div>
   )
 
+  const LoadingSkeleton = () => (
+    <div className='flex flex-col gap-3 animate-pulse'>
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div
+          key={`journal-skeleton-${index}`}
+          className='border-2 border-indigo-100 rounded-xl p-4'>
+          <div className='h-5 w-1/3 bg-indigo-100 rounded mb-2' />
+          <div className='h-4 w-3/4 bg-gray-100 rounded' />
+        </div>
+      ))}
+    </div>
+  )
+
   let wordsElement
   if (loadError) {
-    wordsElement = <div className='text-rose-600 text-center'>{loadError}</div>
-  } else if (isLoading && displayedWords?.length === 0) {
-    wordsElement = <div className='text-center'>Loading journal...</div>
-  } else if (displayedWords?.length > 0) {
+    wordsElement = (
+      <div className='flex flex-col items-center gap-3'>
+        <div className='text-rose-600 text-center'>{loadError}</div>
+        <button
+          type='button'
+          className='border-2 border-indigo-100 rounded-lg px-4 py-2 font-semibold hover:bg-indigo-100 hover:text-indigo-800'
+          onClick={() => {
+            fetchJournalWords().catch((error) => {
+              console.error('retry load journal failed', error)
+            })
+          }}>
+          Retry
+        </button>
+      </div>
+    )
+  } else if (isLoading && displayedWords.length === 0) {
+    wordsElement = <LoadingSkeleton />
+  } else if (displayedWords.length > 0) {
     wordsElement = displayedWords.map((word) => (
       <Word
         key={word.id}
@@ -200,12 +285,23 @@ const Journal = () => {
                   `}
                 onClick={() => dispatch(setJournalFilterOpen(!filterOpen))}>
                 {filterOpen ? 'Hide' : 'Show'} filter
-            </button>
+              </button>
               )
             : (
               <Filter page='journal' />
               )}
           <div className='flex justify-between gap-2'>
+            <button
+              type='button'
+              onClick={() => {
+                fetchJournalWords().catch((error) => {
+                  console.error('refresh journal failed', error)
+                })
+              }}
+              disabled={isLoading}
+              className='py-1 px-3 border-2 border-indigo-100 rounded-lg text-sm font-semibold hover:bg-indigo-100 hover:text-indigo-800 disabled:opacity-50'>
+              Refresh
+            </button>
             <button
               onClick={handleDetailsClick}
               className='py-1 px-3 border-2 border-indigo-100 rounded-lg text-sm font-semibold hover:bg-indigo-100 hover:text-indigo-800'>
@@ -229,6 +325,14 @@ const Journal = () => {
         {filterOpen && isMobile && (
           <div>
             <Filter page='journal' />
+          </div>
+        )}
+        {statusMessage.text && (
+          <div
+            className={`text-sm font-semibold ${
+              statusMessage.type === 'success' ? 'text-emerald-700' : 'text-rose-700'
+            }`}>
+            {statusMessage.text}
           </div>
         )}
         <div className='journal--words flex flex-col gap-3'>

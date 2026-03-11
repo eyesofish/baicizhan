@@ -65,6 +65,23 @@ app:
     target-language: zh-Hans
     dry-run: false
     exit-on-finish: false
+  learning:
+    recall:
+      review-quota: 100
+      hard-quota: 50
+      new-quota: 50
+      total-candidates: 200
+      recent-terms-for-user-vector: 30
+    re-ranking:
+      new-quota: 10
+      review-quota: 7
+      hard-quota: 3
+      max-consecutive-same-source: 2
+    ann:
+      enabled: true
+      base-url: http://127.0.0.1:18080
+      timeout-ms: 300
+      top-k: 300
 
 management:
   endpoints:

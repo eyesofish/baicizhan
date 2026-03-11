@@ -1,19 +1,20 @@
-# Baicizhan 项目一键拉起教程（Git Bash 版）
+# Baicizhan 运行说明（Git Bash 命令版）
 
-这份文档按 **Windows + Git Bash** 写，默认你当前目录是：
-
-`/d/Github/baicizhan`
+本文档只给 **Windows + Git Bash** 可直接复制执行的命令。  
+默认仓库路径：`/d/Github/baicizhan`
 
 ---
 
-## 1. 先准备环境（只需要一次）
+## 1. 环境准备（首次）
 
-1. 安装 JDK 21  
-2. 安装 Node.js 18+（建议 20 LTS）  
-3. 安装 Docker Desktop，并确保状态是 Running  
-4. Windows 上可调用 `powershell.exe`（默认都有）
+需要安装：
 
-可选自检命令（在 Git Bash 里执行）：
+1. JDK 21
+2. Node.js 18+（建议 20 LTS）
+3. Docker Desktop（状态必须是 Running）
+4. PowerShell（Windows 默认有）
+
+可选自检（在 Git Bash 执行）：
 
 ```bash
 java -version
@@ -25,7 +26,7 @@ docker compose version
 
 ---
 
-## 2. 第一次安装前端依赖（只需要一次）
+## 2. 首次安装依赖（前端）
 
 ```bash
 cd /d/Github/baicizhan/frontend
@@ -34,34 +35,46 @@ npm install
 
 ---
 
-## 3. 一条命令拉起整个项目
-
-回到项目根目录，执行：
+## 3. 一键启动（前后端 + MySQL + Redis）
 
 ```bash
 cd /d/Github/baicizhan
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./start-dev.ps1
 ```
 
-这条命令会自动做完：
+启动脚本会自动完成：
 
-1. 启动 `docker-compose.yml` 里的 MySQL + Redis
-2. 自动检查词库数据是否存在
-3. 如果数据库为空，自动执行词库导入
-4. 启动后端（Spring Boot，`mysql` profile）
-5. 启动前端（Vue3 + Vite）
+1. 启动 Docker 中的 MySQL + Redis
+2. 检查词库并按需导入
+3. 启动后端（Spring Boot，`mysql` profile）
+4. 启动前端（React + react-scripts，端口 5173）
 
-说明：首次默认导入 2000 词，优先保证快速可用。
+启动后访问：
 
-启动成功后可访问：
-
-1. 前端: `http://localhost:5173`
-2. 后端: `http://localhost:8080`
-3. Swagger: `http://localhost:8080/swagger-ui.html`
+1. 前端：`http://localhost:5173`
+2. 后端：`http://localhost:8080`
+3. Swagger：`http://localhost:8080/swagger-ui.html`
 
 ---
 
-## 4. 常用启动参数
+## 4. （可选）启动 ANN 服务（embedding recall 推荐）
+
+如果你要测试向量召回（Faiss），再开一个 Git Bash 窗口执行：
+
+```bash
+conda activate baicizhan
+cd /d/Github/baicizhan
+uvicorn ann_service:app --host 0.0.0.0 --port 18080
+```
+
+说明：
+
+1. 后端默认 `app.learning.ann.enabled=true`
+2. ANN 没启动也能跑，后端会自动降级为规则召回（会有 warn 日志）
+
+---
+
+## 5. 常用启动参数
 
 强制重新导入词库：
 
@@ -70,7 +83,7 @@ cd /d/Github/baicizhan
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./start-dev.ps1 -ForceImport -ImportLimit 10000
 ```
 
-重置 MySQL/Redis 数据后再启动（危险，会清空容器卷）：
+重置 MySQL/Redis 后再启动（危险：会清空容器卷）：
 
 ```bash
 cd /d/Github/baicizhan
@@ -79,16 +92,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./start-dev.ps1 -ResetDa
 
 ---
 
-## 5. 一条命令停止项目
+## 6. 停止项目
 
-保留 MySQL/Redis 数据：
+停止前后端 + 停止容器（保留 MySQL/Redis 数据）：
 
 ```bash
 cd /d/Github/baicizhan
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./stop-dev.ps1
 ```
 
-连容器数据一起删掉：
+停止并删除容器卷（清数据）：
 
 ```bash
 cd /d/Github/baicizhan
@@ -97,33 +110,48 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./stop-dev.ps1 -RemoveDa
 
 ---
 
-## 6. 日志在哪看
+## 7. 日志查看（Git Bash）
 
-统一启动脚本会把日志写到根目录 `.runtime`：
+日志文件位置：
 
-1. 后端标准输出: `.runtime/backend-dev.out.log`
-2. 后端错误输出: `.runtime/backend-dev.err.log`
-3. 前端标准输出: `.runtime/frontend-dev.out.log`
-4. 前端错误输出: `.runtime/frontend-dev.err.log`
+1. `.runtime/backend-dev.out.log`
+2. `.runtime/backend-dev.err.log`
+3. `.runtime/frontend-dev.out.log`
+4. `.runtime/frontend-dev.err.log`
+
+实时追日志：
+
+```bash
+cd /d/Github/baicizhan
+tail -f .runtime/backend-dev.out.log
+```
+
+```bash
+cd /d/Github/baicizhan
+tail -f .runtime/frontend-dev.out.log
+```
 
 ---
 
-## 7. 常见问题
+## 8. 常见问题
 
-1. `docker compose` 连接不到引擎  
-先手动打开 Docker Desktop，等状态变成 Running 再执行启动命令。
+1. Docker 连接失败
 
-2. 5173 或 8080 端口被占用  
-先执行停止命令，再检查端口占用（Git Bash 里调用 PowerShell）：
+先打开 Docker Desktop，等到 Running 再执行启动命令。
+
+2. 端口占用（5173/8080/18080）
 
 ```bash
-powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 5173,8080 -State Listen"
+powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 5173,8080,18080 -State Listen"
 ```
 
-3. 启动时提示已经有 dev 进程  
-先执行：
+3. 提示已有 dev 进程
 
 ```bash
 cd /d/Github/baicizhan
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./stop-dev.ps1
 ```
+
+4. ANN 调用报错
+
+检查 `uvicorn ann_service:app --port 18080` 是否在运行；若不跑 ANN，可忽略（会走规则召回降级）。

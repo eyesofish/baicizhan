@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import Word from '../../components/Features/Word/Word'
 import { getWordData } from '../../services/wordAPI'
@@ -13,49 +13,42 @@ import {
 } from '../../reducers/wordMeaningsReducer'
 import { setCurrentPage as setSearchCurrentPage } from '../../reducers/searchReducer'
 import useIsMobile from '../../hooks/useIsMobile'
+import { normalizeApiError } from '../../services/backendAPI'
 
 const WordMeanings = () => {
   const { word } = useParams()
   const dispatch = useDispatch()
   const { isMobile } = useIsMobile(1070)
+  const [retryToken, setRetryToken] = useState(0)
+  const [isNotFound, setIsNotFound] = useState(false)
   const {
     wordData,
     isLoading,
     partOfSpeechFilter,
     showAllDetails,
-    showDetails,
     error,
     filterOpen
   } = useSelector((state) => state.wordMeanings)
 
-  console.log('showAllDetails', showAllDetails)
-  console.log('showDetails', showDetails)
+  const displayedMeanings = (() => {
+    if (partOfSpeechFilter !== '') {
+      if (partOfSpeechFilter === 'other') {
+        return wordData?.filter(
+          (result) =>
+            result.partOfSpeech !== 'noun' &&
+            result.partOfSpeech !== 'verb' &&
+            result.partOfSpeech !== 'adjective' &&
+            result.partOfSpeech !== 'adverb'
+        )
+      }
 
-  console.log('word data in WordMeanings', wordData)
-
-  let displayedMeanings
-
-  if (partOfSpeechFilter !== '') {
-    if (partOfSpeechFilter === 'other') {
-      displayedMeanings = wordData?.filter(
-        (result) =>
-          result.partOfSpeech !== 'noun' &&
-          result.partOfSpeech !== 'verb' &&
-          result.partOfSpeech !== 'adjective' &&
-          result.partOfSpeech !== 'adverb'
-      )
-    } else {
-      displayedMeanings = wordData?.filter(
+      return wordData?.filter(
         (result) => result.partOfSpeech === partOfSpeechFilter
       )
-      // console.log('displayedMeanings', displayedMeanings)
     }
-  } else {
-    displayedMeanings = wordData
-  }
 
-  // console.log('word inside WordMeanings', word)
-  // console.log('wordData', wordData)
+    return wordData
+  })()
 
   const handleDetailsClick = (e) => {
     e.preventDefault()
@@ -63,34 +56,51 @@ const WordMeanings = () => {
   }
 
   useEffect(() => {
-    async function fetchData () {
+    const controller = new AbortController()
+
+    const fetchData = async () => {
       dispatch(setMeaningsIsLoading(true))
+      dispatch(setMeaningsError(null))
+
       try {
-        if (
-          wordData.length > 0 &&
-          wordData.every((data) => data.word === word)
-        ) {
-          console.log('wordData already exists')
-        } else {
-          const returnedWordData = await getWordData(word)
-          console.log('returnedWordData', returnedWordData)
-          dispatch(setMeaningsWordData(returnedWordData))
-          dispatch(setMeaningsError(null))
+        const returnedWordData = await getWordData(word, controller.signal)
+        if (controller.signal.aborted) {
+          return
         }
+
+        dispatch(setMeaningsWordData(returnedWordData))
+        setIsNotFound((returnedWordData?.results || []).length === 0)
       } catch (error) {
+        if (error?.code === 'ERR_CANCELED') {
+          return
+        }
+
+        setIsNotFound(false)
         dispatch(
-          setMeaningsError({
-            ...error,
-            message:
+          setMeaningsError(
+            normalizeApiError(
+              error,
               'Sorry, we are having trouble fetching the data. Please try again later.'
-          })
+            )
+          )
         )
       } finally {
-        dispatch(setMeaningsIsLoading(false))
+        if (!controller.signal.aborted) {
+          dispatch(setMeaningsIsLoading(false))
+        }
       }
     }
-    fetchData()
-  }, [word, dispatch, wordData])
+
+    fetchData().catch((error) => {
+      if (error?.code !== 'ERR_CANCELED') {
+        console.error('fetch word meanings failed', error)
+      }
+    })
+
+    return () => {
+      controller.abort()
+    }
+  }, [word, dispatch, retryToken])
 
   useEffect(() => {
     dispatch(setSearchCurrentPage(`search/${word}`))
@@ -101,29 +111,39 @@ const WordMeanings = () => {
       return <div>Loading...</div>
     }
 
+    if (error) {
+      return (
+        <div className='flex flex-col items-start gap-2'>
+          <div>Error: {error.message}</div>
+          <button
+            type='button'
+            className='border-2 border-indigo-100 rounded-lg px-3 py-1 text-sm font-semibold hover:bg-indigo-100 hover:text-indigo-800'
+            onClick={() => setRetryToken((value) => value + 1)}>
+            Retry
+          </button>
+        </div>
+      )
+    }
+
+    if (isNotFound) {
+      return <div>Word not found.</div>
+    }
+
     if (displayedMeanings && displayedMeanings.length > 0) {
-      return displayedMeanings.map((result, i) => (
+      return displayedMeanings.map((result, index) => (
         <Word
-          key={result.word + i}
+          key={result.word + index}
           wordData={result}
           page='search'
         />
       ))
-    } else if (partOfSpeechFilter === '') {
-      return (
-        <Word
-          key={wordData.word || 'no word'}
-          wordData={wordData}
-          page='search'
-        />
-      )
-    } else {
-      return (
-        <div>
-          No results found. Try clearing the filter or switch to other filters.
-        </div>
-      )
     }
+
+    return (
+      <div>
+        No results found. Try clearing the filter or switch to other filters.
+      </div>
+    )
   })()
 
   return (
@@ -138,16 +158,16 @@ const WordMeanings = () => {
           </Link>
           {isMobile
             ? (
-                <button
-                  className={`text-sm text-gray-700 font-semibold border-2 border-indigo-100 hover:text-indigo-800 hover:bg-indigo-100 py-1 px-3 rounded-lg
+              <button
+                className={`text-sm text-gray-700 font-semibold border-2 border-indigo-100 hover:text-indigo-800 hover:bg-indigo-100 py-1 px-3 rounded-lg
                 ${filterOpen ? 'bg-indigo-100' : ''}
               `}
-                  onClick={() => dispatch(setMeaningsFilterOpen(!filterOpen))}>
-                  {filterOpen ? 'Hide' : 'Show'} filter
-                </button>
+                onClick={() => dispatch(setMeaningsFilterOpen(!filterOpen))}>
+                {filterOpen ? 'Hide' : 'Show'} filter
+              </button>
               )
             : (
-                <Filter page='search' />
+              <Filter page='search' />
               )}
         </div>
         <button
@@ -161,7 +181,7 @@ const WordMeanings = () => {
           <Filter page='search' />
         </div>
       )}
-      {error ? <div>Error: {error.message}</div> : wordDataElement}
+      {wordDataElement}
     </div>
   )
 }
