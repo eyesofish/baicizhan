@@ -2,3 +2,8 @@
 datasets/
 demo/.m2/
 demo/.runtime/
+scripts/
+start-dev.ps1
+stop-dev.ps1
+HOW_TO_RUN.md
+frontend-page-integration-guide.md
