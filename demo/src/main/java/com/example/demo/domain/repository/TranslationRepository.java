@@ -9,4 +9,6 @@ public interface TranslationRepository extends JpaRepository<Translation, Long> 
     List<Translation> findBySenseIdIn(Collection<Long> senseIds);
 
     boolean existsBySenseIdAndTargetLanguageIdAndTranslatedText(Long senseId, Integer targetLanguageId, String translatedText);
+
+    void deleteBySenseId(Long senseId);
 }

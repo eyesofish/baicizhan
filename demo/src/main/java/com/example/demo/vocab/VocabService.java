@@ -6,9 +6,13 @@ import com.example.demo.domain.repository.*;
 import com.example.demo.term.TermService;
 import com.example.demo.vocab.dto.AddVocabItemRequest;
 import com.example.demo.vocab.dto.CreateVocabListRequest;
+import com.example.demo.vocab.dto.VocabItemDetailResponse;
 import com.example.demo.vocab.dto.VocabItemResponse;
 import com.example.demo.vocab.dto.VocabListResponse;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +27,7 @@ public class VocabService {
     private final ExampleSentenceRepository exampleSentenceRepository;
     private final VocabListRepository vocabListRepository;
     private final VocabItemRepository vocabItemRepository;
+    private final UserProgressRepository userProgressRepository;
     private final TermService termService;
 
     public VocabService(
@@ -34,6 +39,7 @@ public class VocabService {
         ExampleSentenceRepository exampleSentenceRepository,
         VocabListRepository vocabListRepository,
         VocabItemRepository vocabItemRepository,
+        UserProgressRepository userProgressRepository,
         TermService termService
     ) {
         this.appUserRepository = appUserRepository;
@@ -44,6 +50,7 @@ public class VocabService {
         this.exampleSentenceRepository = exampleSentenceRepository;
         this.vocabListRepository = vocabListRepository;
         this.vocabItemRepository = vocabItemRepository;
+        this.userProgressRepository = userProgressRepository;
         this.termService = termService;
     }
 
@@ -116,6 +123,69 @@ public class VocabService {
         return new VocabItemResponse(list.getId(), item.getId(), term.getId(), sense == null ? null : sense.getId());
     }
 
+    @Transactional(readOnly = true)
+    public List<VocabItemDetailResponse> listItems(Long userId, Long listId) {
+        vocabListRepository.findByIdAndUserId(listId, userId)
+            .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, 4042, "VOCAB_LIST_NOT_FOUND"));
+        List<VocabItem> items = vocabItemRepository.findByListIdAndListUserIdOrderByCreatedAtDesc(listId, userId);
+        return toItemDetailResponses(userId, items);
+    }
+
+    @Transactional
+    public VocabItemDetailResponse updateItem(Long userId, Long listId, Long itemId, AddVocabItemRequest req) {
+        VocabItem item = vocabItemRepository.findByIdAndListIdAndListUserId(itemId, listId, userId)
+            .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, 4043, "VOCAB_ITEM_NOT_FOUND"));
+        VocabList list = item.getList();
+
+        String normalized = normalize(req.text());
+        if (normalized.isEmpty()) {
+            throw new AppException(HttpStatus.BAD_REQUEST, 4006, "WORD_REQUIRED");
+        }
+
+        Term originalTerm = item.getTerm();
+        Term targetTerm = termRepository.findByLanguageIdAndNormalizedText(list.getSourceLanguage().getId(), normalized).orElse(null);
+        if (targetTerm == null) {
+            targetTerm = createTerm(list, req, normalized);
+        } else if (Objects.equals(targetTerm.getId(), originalTerm.getId())) {
+            targetTerm.setText(req.text().trim());
+            targetTerm.setNormalizedText(normalized);
+            targetTerm.setIpa(blankToNull(req.ipa()));
+            targetTerm.setAudioUrl(blankToNull(req.audioUrl()));
+            targetTerm = termRepository.save(targetTerm);
+        }
+
+        if (!Objects.equals(targetTerm.getId(), originalTerm.getId()) && vocabItemRepository.existsByListIdAndTermId(listId, targetTerm.getId())) {
+            throw new AppException(HttpStatus.CONFLICT, 4092, "TERM_ALREADY_IN_LIST");
+        }
+
+        item.setTerm(targetTerm);
+        item.setSense(upsertSenseAndContent(list, targetTerm, item.getSense(), req));
+        vocabItemRepository.save(item);
+
+        termService.evictTermCache(targetTerm.getId());
+        if (!Objects.equals(targetTerm.getId(), originalTerm.getId())) {
+            termService.evictTermCache(originalTerm.getId());
+        }
+
+        return toItemDetailResponses(userId, List.of(item)).stream()
+            .findFirst()
+            .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, 4043, "VOCAB_ITEM_NOT_FOUND"));
+    }
+
+    @Transactional
+    public void deleteItem(Long userId, Long listId, Long itemId) {
+        VocabItem item = vocabItemRepository.findByIdAndListIdAndListUserId(itemId, listId, userId)
+            .orElseThrow(() -> new AppException(HttpStatus.NOT_FOUND, 4043, "VOCAB_ITEM_NOT_FOUND"));
+        Long termId = item.getTerm().getId();
+        vocabItemRepository.delete(item);
+
+        if (!vocabItemRepository.existsByListUserIdAndTermId(userId, termId)) {
+            userProgressRepository.deleteByUserIdAndTermId(userId, termId);
+        }
+
+        termService.evictTermCache(termId);
+    }
+
     private Term createTerm(VocabList list, AddVocabItemRequest req, String normalized) {
         Term term = new Term();
         term.setLanguage(list.getSourceLanguage());
@@ -127,16 +197,32 @@ public class VocabService {
     }
 
     private Sense maybeCreateSenseAndContent(VocabList list, Term term, AddVocabItemRequest req) {
+        return upsertSenseAndContent(list, term, null, req);
+    }
+
+    private Sense upsertSenseAndContent(VocabList list, Term term, Sense currentSense, AddVocabItemRequest req) {
         boolean hasSenseData =
             hasText(req.definition()) || hasText(req.partOfSpeech()) || hasText(req.translation()) || hasText(req.example());
         if (!hasSenseData) {
             return null;
         }
-        Sense sense = new Sense();
-        sense.setTerm(term);
+        Sense sense;
+        if (
+            currentSense != null &&
+            currentSense.getTerm() != null &&
+            Objects.equals(currentSense.getTerm().getId(), term.getId())
+        ) {
+            sense = currentSense;
+        } else {
+            sense = new Sense();
+            sense.setTerm(term);
+        }
         sense.setPartOfSpeech(blankToNull(req.partOfSpeech()));
         sense.setDefinition(blankToNull(req.definition()));
         senseRepository.save(sense);
+
+        translationRepository.deleteBySenseId(sense.getId());
+        exampleSentenceRepository.deleteBySenseId(sense.getId());
 
         if (hasText(req.translation())) {
             Translation trans = new Translation();
@@ -155,6 +241,61 @@ public class VocabService {
             exampleSentenceRepository.save(example);
         }
         return sense;
+    }
+
+    private List<VocabItemDetailResponse> toItemDetailResponses(Long userId, List<VocabItem> items) {
+        List<Long> termIds = items.stream()
+            .map(item -> item.getTerm().getId())
+            .distinct()
+            .toList();
+        Map<Long, UserProgress> progressByTerm = termIds.isEmpty()
+            ? Map.of()
+            : userProgressRepository.findByUserIdAndTermIdIn(userId, termIds)
+                .stream()
+                .collect(Collectors.toMap(progress -> progress.getTerm().getId(), progress -> progress));
+
+        List<Long> senseIds = items.stream()
+            .map(VocabItem::getSense)
+            .filter(Objects::nonNull)
+            .map(Sense::getId)
+            .toList();
+        Map<Long, List<ExampleSentence>> examplesBySense = senseIds.isEmpty()
+            ? Map.of()
+            : exampleSentenceRepository.findBySenseIdIn(senseIds)
+                .stream()
+                .collect(Collectors.groupingBy(example -> example.getSense().getId()));
+
+        return items.stream()
+            .map(item -> {
+                Sense sense = item.getSense();
+                UserProgress progress = progressByTerm.get(item.getTerm().getId());
+                List<String> examples = sense == null
+                    ? List.of()
+                    : examplesBySense
+                        .getOrDefault(sense.getId(), List.of())
+                        .stream()
+                        .map(ExampleSentence::getSentenceText)
+                        .filter(Objects::nonNull)
+                        .map(String::trim)
+                        .filter(text -> !text.isEmpty())
+                        .toList();
+                return new VocabItemDetailResponse(
+                    item.getList().getId(),
+                    item.getId(),
+                    item.getTerm().getId(),
+                    sense == null ? null : sense.getId(),
+                    item.getTerm().getText(),
+                    item.getTerm().getIpa(),
+                    sense == null ? null : sense.getPartOfSpeech(),
+                    sense == null ? null : sense.getDefinition(),
+                    examples,
+                    progress == null || progress.getRepetition() == null ? 0 : progress.getRepetition(),
+                    item.getCreatedAt(),
+                    item.getTerm().getUpdatedAt(),
+                    progress == null ? null : progress.getLastReviewAt()
+                );
+            })
+            .toList();
     }
 
     private String normalize(String text) {

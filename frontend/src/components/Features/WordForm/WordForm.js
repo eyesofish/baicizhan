@@ -1,0 +1,282 @@
+import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import TextArea from '../../Common/TextArea'
+import WordFormImages from './WordFormImages'
+import { v4 as uuidv4 } from 'uuid'
+import { useDispatch, useSelector } from 'react-redux'
+import {
+  setPartOfSpeechFilter as setJournalPartOfSpeechFilter,
+  setListId as setJournalListId,
+  setShowForm as setJournalShowForm,
+  setWords as setJournalWords,
+  setSortValue as setJournalSortValue
+} from '../../../reducers/journalReducer'
+import { setShowForm as setSearchShowForm } from '../../../reducers/searchReducer'
+import WordFormField from './WordFormField'
+import Overlay from '../../Common/Overlay'
+import WordFormHeader from './WordFormHeader'
+import Button from '../../Common/Button'
+import PropType from 'prop-types'
+import {
+  addJournalWord,
+  getApiErrorMessage,
+  updateJournalWord
+} from '../../../services/backendAPI'
+
+const WordForm = ({ page }) => {
+  const dispatch = useDispatch()
+  const navigate = useNavigate()
+
+  const [message, setMessage] = useState({ text: '', type: '' })
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (message.text !== '') {
+        setMessage({ text: '', type: '' })
+      }
+    }, 2000)
+
+    return () => clearTimeout(timer)
+  }, [message])
+
+  const formWord = useSelector((state) => {
+    if (page === 'search') {
+      return state.search.formWord
+    } else if (page === 'journal') {
+      return state.journal.formWord
+    }
+  })
+
+  const now = new Date().toISOString()
+
+  const [formData, setFormData] = useState({
+    id: formWord.id || formWord.itemId || uuidv4(),
+    itemId: formWord.itemId || formWord.id || null,
+    listId: formWord.listId || null,
+    termId: formWord.termId || null,
+    word: formWord.word || '',
+    pronunciation: formWord.pronunciation || '',
+    partOfSpeech: formWord.partOfSpeech || '',
+    definition:
+      (formWord.definition
+        ? formWord.definition[0].toUpperCase() + formWord.definition.slice(1)
+        : '') ||
+      'No definition found',
+    synonyms: formWord.synonyms || [],
+    antonyms: formWord.antonyms || [],
+    examples: formWord.examples || [],
+    images: formWord.images || [],
+    lastUpdated: now,
+    created: page === 'search' ? now : formWord.created,
+    points: formWord.points || 0,
+    lastReviewed: formWord.lastReviewed || null
+  })
+
+  console.log('formWord in WordForm', formWord)
+
+  const toggleShowForm = (show) => {
+    if (page === 'search') {
+      dispatch(setSearchShowForm(show))
+    } else if (page === 'journal') {
+      dispatch(setJournalShowForm(show))
+    }
+  }
+
+  console.log('formData', formData)
+
+  const handleChange = (e, index) => {
+    const { name, value } = e.target
+    setFormData((prevFormData) => {
+      if (Array.isArray(prevFormData[name])) {
+        const newArr = [...prevFormData[name]]
+        newArr[index] = value
+        return {
+          ...prevFormData,
+          [name]: newArr
+        }
+      } else {
+        return {
+          ...prevFormData,
+          [name]: value
+        }
+      }
+    })
+  }
+
+  const handleDelete = (e, index) => {
+    console.log('e.target', e.target)
+    const name = e.target.name
+    console.log('name', name, 'index', index)
+    setFormData((prevFormData) => {
+      const newArr = [...prevFormData[name]]
+      newArr.splice(index, 1)
+      return {
+        ...prevFormData,
+        [name]: newArr
+      }
+    })
+    setMessage({ text: 'Image deleted!', type: 'success' })
+  }
+
+  const handleAdd = (e) => {
+    console.log('e.target', e.target)
+    const name = e.target.name
+    console.log('handleAdd name', name)
+    setFormData((prevFormData) => {
+      return {
+        ...prevFormData,
+        [name]: [...prevFormData[name], '']
+      }
+    })
+  }
+
+  const getFilteredFormData = () => {
+    console.log('formData', formData)
+
+    return Object.keys(formData).reduce((acc, key) => {
+      if (Array.isArray(formData[key]) && formData[key].length > 0) {
+        acc[key] = formData[key].filter((item) => item !== '')
+      } else if (
+        !Array.isArray(formData[key]) &&
+        formData[key] !== '' &&
+        key !== 'definition'
+      ) {
+        acc[key] = formData[key]
+      } else if (key === 'definition' && formData[key] !== '') {
+        acc[key] = formData[key]
+      } else if (Array.isArray(formData[key])) {
+        acc[key] = []
+      } else if (key === 'definition' && formData[key] === '') {
+        acc[key] = 'No definition found'
+      }
+      return acc
+    }, {})
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+
+    const filteredFormData = getFilteredFormData()
+    console.log('filteredFormData', filteredFormData)
+
+    try {
+      const result =
+        page === 'search'
+          ? await addJournalWord(filteredFormData)
+          : await updateJournalWord(filteredFormData)
+
+      dispatch(setJournalListId(result.listId))
+      dispatch(setJournalWords(result.words))
+
+      if (page === 'search') {
+        navigate('../../journal')
+        dispatch(setJournalPartOfSpeechFilter(''))
+        dispatch(setJournalSortValue('updated'))
+      }
+
+      toggleShowForm(false)
+    } catch (error) {
+      window.alert(
+        getApiErrorMessage(error, 'Failed to save this word to backend.')
+      )
+    }
+  }
+
+  const {
+    word,
+    pronunciation,
+    partOfSpeech,
+    definition,
+    synonyms,
+    antonyms,
+    examples
+  } = formData
+
+  const fieldList = [
+    {
+      name: 'synonyms',
+      data: synonyms
+    },
+    {
+      name: 'antonyms',
+      data: antonyms
+    },
+    {
+      name: 'examples',
+      data: examples
+    }
+  ]
+
+  return (
+    <>
+      <Overlay>
+        <div className='word-form bg-white w-full md:w-2/3 rounded-xl overflow-hidden'>
+          <form onSubmit={handleSubmit}>
+            <WordFormHeader
+              word={word}
+              pronunciation={pronunciation}
+              partOfSpeech={partOfSpeech}
+              message={message}
+            />
+            <div className='py-4 px-3 md:px-6 flex flex-col gap-3 overflow-y-auto max-h-[60vh]'>
+              <div className='word-form--definition flex flex-col gap-2'>
+                <label
+                  htmlFor='definition'
+                  className='font-bold'>
+                  Definition
+                </label>
+                <TextArea
+                  className='border-2'
+                  id='definition'
+                  name='definition'
+                  value={definition}
+                  onBlur={(e) => handleChange(e)}
+                  height='h-15'
+                />
+              </div>
+
+              {fieldList.map((field) => (
+                <WordFormField
+                  key={field.name}
+                  fieldName={field.name}
+                  fieldData={field.data}
+                  handleChange={handleChange}
+                  handleDelete={handleDelete}
+                  handleAdd={handleAdd}
+                />
+              ))}
+              <WordFormImages
+                formData={formData}
+                setFormData={setFormData}
+                handleDelete={handleDelete}
+                setMessage={setMessage}
+              />
+            </div>
+            <div className='py-4 px-6 md:py-6 border-t flex justify-between'>
+              <Button
+                bgColor='gray'
+                size='md'
+                type='button'
+                onClick={() => toggleShowForm(false)}>
+                Cancel
+              </Button>
+              <Button
+                bgColor='indigo'
+                size='md'
+                className='font-semibold'
+                type='submit'>
+                Confirm
+              </Button>
+            </div>
+          </form>
+        </div>
+      </Overlay>
+    </>
+  )
+}
+
+export default WordForm
+
+WordForm.propTypes = {
+  page: PropType.string.isRequired
+}

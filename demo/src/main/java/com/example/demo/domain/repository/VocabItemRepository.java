@@ -10,7 +10,13 @@ import org.springframework.data.repository.query.Param;
 public interface VocabItemRepository extends JpaRepository<VocabItem, Long> {
     boolean existsByListIdAndTermId(Long listId, Long termId);
 
+    boolean existsByListUserIdAndTermId(Long userId, Long termId);
+
     long countByListId(Long listId);
+
+    List<VocabItem> findByListIdAndListUserIdOrderByCreatedAtDesc(Long listId, Long userId);
+
+    java.util.Optional<VocabItem> findByIdAndListIdAndListUserId(Long id, Long listId, Long userId);
 
     @Query("""
         select vi.term.id

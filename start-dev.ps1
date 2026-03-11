@@ -155,19 +155,46 @@ $backendProc = Start-Process `
 
 Wait-HttpReady -Url "http://localhost:8080/actuator/health" -TimeoutSec 240
 
-Write-Host "[5/6] Starting frontend (Vite) ..."
+Write-Host "[5/6] Starting frontend ..."
 $viteCli = Join-Path $frontendDir "node_modules\vite\bin\vite.js"
-if (-not (Test-Path $viteCli)) {
+$reactScriptsCli = Join-Path $frontendDir "node_modules\react-scripts\bin\react-scripts.js"
+
+if (Test-Path $reactScriptsCli) {
+  $oldPort = $env:PORT
+  $oldHost = $env:HOST
+  try {
+    $env:PORT = "5173"
+    $env:HOST = "0.0.0.0"
+    $frontendProc = Start-Process `
+      -FilePath "node.exe" `
+      -ArgumentList @($reactScriptsCli, "start") `
+      -WorkingDirectory $frontendDir `
+      -PassThru `
+      -RedirectStandardOutput $frontendOut `
+      -RedirectStandardError $frontendErr
+  } finally {
+    if ($null -eq $oldPort) {
+      Remove-Item Env:PORT -ErrorAction SilentlyContinue
+    } else {
+      $env:PORT = $oldPort
+    }
+    if ($null -eq $oldHost) {
+      Remove-Item Env:HOST -ErrorAction SilentlyContinue
+    } else {
+      $env:HOST = $oldHost
+    }
+  }
+} elseif (Test-Path $viteCli) {
+  $frontendProc = Start-Process `
+    -FilePath "node.exe" `
+    -ArgumentList @($viteCli, "--host", "0.0.0.0", "--port", "5173") `
+    -WorkingDirectory $frontendDir `
+    -PassThru `
+    -RedirectStandardOutput $frontendOut `
+    -RedirectStandardError $frontendErr
+} else {
   throw "Frontend dependencies not found. Run: cd frontend; npm install"
 }
-
-$frontendProc = Start-Process `
-  -FilePath "node.exe" `
-  -ArgumentList @($viteCli, "--host", "0.0.0.0", "--port", "5173") `
-  -WorkingDirectory $frontendDir `
-  -PassThru `
-  -RedirectStandardOutput $frontendOut `
-  -RedirectStandardError $frontendErr
 
 Wait-HttpReady -Url "http://localhost:5173" -TimeoutSec 120
 

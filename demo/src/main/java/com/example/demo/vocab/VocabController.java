@@ -4,6 +4,7 @@ import com.example.demo.common.api.ApiResponse;
 import com.example.demo.security.UserPrincipal;
 import com.example.demo.vocab.dto.AddVocabItemRequest;
 import com.example.demo.vocab.dto.CreateVocabListRequest;
+import com.example.demo.vocab.dto.VocabItemDetailResponse;
 import com.example.demo.vocab.dto.VocabItemResponse;
 import com.example.demo.vocab.dto.VocabListResponse;
 import jakarta.validation.Valid;
@@ -40,5 +41,33 @@ public class VocabController {
         @Valid @RequestBody AddVocabItemRequest req
     ) {
         return ApiResponse.ok(vocabService.addItem(principal.getId(), listId, req));
+    }
+
+    @GetMapping("/{listId}/items")
+    public ApiResponse<List<VocabItemDetailResponse>> listItems(
+        @AuthenticationPrincipal UserPrincipal principal,
+        @PathVariable Long listId
+    ) {
+        return ApiResponse.ok(vocabService.listItems(principal.getId(), listId));
+    }
+
+    @PutMapping("/{listId}/items/{itemId}")
+    public ApiResponse<VocabItemDetailResponse> updateItem(
+        @AuthenticationPrincipal UserPrincipal principal,
+        @PathVariable Long listId,
+        @PathVariable Long itemId,
+        @Valid @RequestBody AddVocabItemRequest req
+    ) {
+        return ApiResponse.ok(vocabService.updateItem(principal.getId(), listId, itemId, req));
+    }
+
+    @DeleteMapping("/{listId}/items/{itemId}")
+    public ApiResponse<Void> deleteItem(
+        @AuthenticationPrincipal UserPrincipal principal,
+        @PathVariable Long listId,
+        @PathVariable Long itemId
+    ) {
+        vocabService.deleteItem(principal.getId(), listId, itemId);
+        return ApiResponse.ok();
     }
 }

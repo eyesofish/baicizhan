@@ -39,6 +39,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(reg -> reg
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/v1/auth/**").permitAll()
+                .requestMatchers("/v1/dictionary/**").permitAll()
                 .requestMatchers("/v1/webhooks/openai").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html")
                 .permitAll()

@@ -50,6 +50,13 @@ app:
       null-ttl-seconds: 30
     review:
       ttl-seconds: 20
+  ai:
+    base-url: ${OPENAI_BASE_URL:http://127.0.0.1:18000/v1}
+    api-key: ${OPENAI_API_KEY:LOCAL_DUMMY_KEY}
+    model: ${LLM_MODEL:qwen2.5-7b-instruct}
+    temperature: 0.7
+    max-tokens: 256
+    timeout-seconds: 120
   import:
     enabled: false
     source-file: ../datasets/high-frequency-vocabulary/30k-explained.txt

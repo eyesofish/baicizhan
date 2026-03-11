@@ -7,4 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ExampleSentenceRepository extends JpaRepository<ExampleSentence, Long> {
     List<ExampleSentence> findBySenseIdIn(Collection<Long> senseIds);
+
+    void deleteBySenseId(Long senseId);
 }

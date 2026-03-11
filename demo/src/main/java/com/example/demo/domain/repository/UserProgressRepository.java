@@ -1,6 +1,7 @@
 package com.example.demo.domain.repository;
 
 import com.example.demo.domain.entity.UserProgress;
+import java.util.Collection;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -11,6 +12,10 @@ import org.springframework.data.repository.query.Param;
 
 public interface UserProgressRepository extends JpaRepository<UserProgress, Long> {
     Optional<UserProgress> findByUserIdAndTermId(Long userId, Long termId);
+
+    List<UserProgress> findByUserIdAndTermIdIn(Long userId, Collection<Long> termIds);
+
+    void deleteByUserIdAndTermId(Long userId, Long termId);
 
     @Query("""
         select up
