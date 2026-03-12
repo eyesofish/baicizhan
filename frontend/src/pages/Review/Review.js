@@ -55,16 +55,23 @@ const Review = () => {
   }, [])
 
   useEffect(() => {
+    if (location.pathname !== '/review') {
+      return
+    }
+
     fetchDueCards().catch((error) => {
       if (!isRequestCanceled(error)) {
         console.error('load review due cards failed', error)
       }
     })
+  }, [fetchDueCards, location.pathname])
 
-    return () => {
+  useEffect(
+    () => () => {
       requestControllerRef.current?.abort()
-    }
-  }, [fetchDueCards])
+    },
+    []
+  )
 
   let reviewContent
   if (loadError) {
